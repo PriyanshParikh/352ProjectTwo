@@ -2,95 +2,98 @@ import socket
 import sys
 
 def load_database(filename):
-    tld_servers = {}
-    own_mappings = {}
-    try:
-        with open(filename, 'r') as f:
-            lines = f.readlines()
-            if len(lines) < 2:
-                raise ValueError("RS database must have at least two lines")
-            tld1 = lines[0].strip().split()
-            tld_servers[tld1[0].lower()] = tld1[1]
-            tld2 = lines[1].strip().split()
-            tld_servers[tld2[0].lower()] = tld2[1]
-            for line in lines[2:]:
-                line = line.strip()
-                if line:
-                    parts = line.split()
-                    own_mappings[parts[0].lower()] = (parts[0], parts[1])
-    except Exception as e:
-        print(f"Error loading database: {e}")
-        sys.exit(1)
-    return tld_servers, own_mappings
+    database = {}
+    with open(filename, "r") as file:
+        lines = file.readlines()
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                database[parts[0]] = parts[1]
+    return database
 
-def get_tld(domain):
-    parts = domain.split('.')
-    return parts[-1].lower() if parts else ''
+def send_query_to_ts(domain, ts_hostname, ts_port, query_id):
+    try:
+        ts_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ts_socket.connect((ts_hostname, ts_port))
+        query = f"0 {domain} {query_id} rd"
+        ts_socket.send(query.encode())
+        response = ts_socket.recv(1024).decode()
+        ts_socket.close()
+        return response
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python rs.py rudns_port")
-        sys.exit(1)
+        print("Usage: python rs.py <rudns_port>")
+        return
 
     rudns_port = int(sys.argv[1])
-    tld_servers, own_mappings = load_database('rsdatabase.txt')
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', rudns_port))
-        s.listen()
-        print(f"RS listening on port {rudns_port}")
+    rs_database = load_database("rsdatabase.txt")
+    ts1_hostname = rs_database.get("com")
+    ts2_hostname = rs_database.get("edu")
 
-        while True:
-            conn, addr = s.accept()
-            with conn:
-                data = conn.recv(1024).decode().strip()
-                if not data:
-                    continue
-                parts = data.split()
-                if len(parts) != 4 or parts[0] != '0':
-                    continue
-                domain = parts[1]
-                req_id = parts[2]
-                flags = parts[3]
-                tld = get_tld(domain)
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('', rudns_port))
+    server_socket.listen(5)
 
-                if tld in tld_servers:
-                    ts_hostname = tld_servers[tld]
-                    if flags == 'it':
-                        response = f"1 {domain} {ts_hostname} {req_id} ns"
-                        conn.sendall(response.encode())
-                        with open('rsresponses.txt', 'a') as log:
-                            log.write(f"{response}\n")
-                    elif flags == 'rd':
-                        try:
-                            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ts_conn:
-                                ts_conn.connect((ts_hostname, rudns_port))
-                                ts_conn.sendall(data.encode())
-                                ts_response = ts_conn.recv(1024).decode().strip()
-                                ts_parts = ts_response.split()
-                                # Modify aa to ra
-                                if ts_parts[4] == 'aa':
-                                    new_response = f"1 {ts_parts[1]} {ts_parts[2]} {req_id} ra"
-                                else:
-                                    new_response = ts_response
-                                conn.sendall(new_response.encode())
-                                with open('rsresponses.txt', 'a') as log:
-                                    log.write(f"{new_response}\n")
-                        except Exception as e:
-                            response = f"1 {domain} 0.0.0.0 {req_id} nx"
-                            conn.sendall(response.encode())
-                            with open('rsresponses.txt', 'a') as log:
-                                log.write(f"{response}\n")
-                else:
-                    key = domain.lower()
-                    if key in own_mappings:
-                        orig_domain, ip = own_mappings[key]
-                        response = f"1 {orig_domain} {ip} {req_id} aa"
+    print(f"Root Server listening on port {rudns_port}")
+
+    responses = []
+
+    while True:
+        client_socket, addr = server_socket.accept()
+        query = client_socket.recv(1024).decode()
+        parts = query.split()
+        domain = parts[1]
+        query_id = parts[2]
+        flag = parts[3]
+
+        # Initialize response variable
+        response = None
+
+        if domain.endswith(".com") and ts1_hostname:
+            if flag == "it":
+                response = f"1 {domain} {ts1_hostname} {query_id} ns"
+            else:
+                ts_response = send_query_to_ts(domain, ts1_hostname, rudns_port, query_id)
+                if ts_response:
+                    ts_parts = ts_response.split()
+                    if ts_parts[4] == "aa":
+                        response = f"1 {domain} {ts_parts[2]} {query_id} ra"
                     else:
-                        response = f"1 {domain} 0.0.0.0 {req_id} nx"
-                    conn.sendall(response.encode())
-                    with open('rsresponses.txt', 'a') as log:
-                        log.write(f"{response}\n")
+                        response = ts_response
+        elif domain.endswith(".edu") and ts2_hostname:
+            if flag == "it":
+                response = f"1 {domain} {ts2_hostname} {query_id} ns"
+            else:
+                ts_response = send_query_to_ts(domain, ts2_hostname, rudns_port, query_id)
+                if ts_response:
+                    ts_parts = ts_response.split()
+                    if ts_parts[4] == "aa":
+                        response = f"1 {domain} {ts_parts[2]} {query_id} ra"
+                    else:
+                        response = ts_response
+        else:
+            ip = rs_database.get(domain, "0.0.0.0")
+            if ip != "0.0.0.0":
+                response = f"1 {domain} {ip} {query_id} aa"
+            else:
+                response = f"1 {domain} 0.0.0.0 {query_id} nx"
 
-if __name__ == '__main__':
+        # Ensure response is assigned before using it
+        if response is None:
+            response = f"1 {domain} 0.0.0.0 {query_id} nx"
+
+        responses.append(response)
+        client_socket.send(response.encode())
+        client_socket.close()
+
+        with open("rsresponses.txt", "w") as file:
+            for resp in responses:
+                file.write(resp + "\n")
+
+if __name__ == "__main__":
     main()
