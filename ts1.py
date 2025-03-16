@@ -29,25 +29,35 @@ def main():
     responses = []
 
     while True:
+        print("Waiting for connection...")  # Debug
         client_socket, addr = server_socket.accept()
+        print(f"Connection received from {addr}")  # Debug
         query = client_socket.recv(1024).decode()
+        print(f"Query received: {query}")  # Debug
+
         parts = query.split()
+        if len(parts) < 3:
+            print(f"Invalid query format: {query}")  # Debug
+            client_socket.close()
+            continue
+
         domain = parts[1]
         query_id = parts[2]
 
-        # Lookup the domain in the TS1 database
+        print(f"Looking up domain: {domain}")  # Debug
         ip = ts1_database.get(domain, "0.0.0.0")
+        print(f"IP found: {ip}")  # Debug
+
         if ip != "0.0.0.0":
             response = f"1 {domain} {ip} {query_id} aa"
         else:
             response = f"1 {domain} 0.0.0.0 {query_id} nx"
 
-        # Log the response
+        print(f"Sending response: {response}")  # Debug
         responses.append(response)
         client_socket.send(response.encode())
         client_socket.close()
 
-        # Write responses to ts1responses.txt
         with open("ts1responses.txt", "w") as file:
             for resp in responses:
                 file.write(resp + "\n")

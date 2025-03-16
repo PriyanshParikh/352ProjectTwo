@@ -30,38 +30,38 @@ def main():
     responses = []
 
     while True:
-        print("Waiting for connection...")  # Debug
+        print("Waiting for connection...")
         client_socket, addr = server_socket.accept()
-        print(f"Connection received from {addr}")  # Debug
+        print(f"Connection received from {addr}")
         query = client_socket.recv(1024).decode()
-        print(f"Query received: {query}")  # Debug
+        print(f"Query received: {query}")
 
         # Split the query into parts
         parts = query.split()
-        if len(parts) < 3:  # Ensure the query has at least 3 parts
-            print(f"Invalid query format: {query}")  # Debug
+        if len(parts) < 3:
+            print(f"Invalid query format: {query}")
             client_socket.close()
             continue
 
         domain = parts[1]
         query_id = parts[2]
 
-        print(f"Looking up domain: {domain}")  # Debug
+        print(f"Looking up domain: {domain}")
         ip = ts2_database.get(domain, "0.0.0.0")
-        print(f"IP found: {ip}")  # Debug
+        print(f"IP found: {ip}")
 
         if ip != "0.0.0.0":
             response = f"1 {domain} {ip} {query_id} aa"
         else:
             response = f"1 {domain} 0.0.0.0 {query_id} nx"
 
-        print(f"Sending response: {response}")  # Debug
+        print(f"Sending response: {response}")
         responses.append(response)
         client_socket.send(response.encode())
         client_socket.close()
 
         # Write responses to ts2responses.txt
-        with open("ts2responses.txt", "a") as file:
+        with open("ts2responses.txt", "w") as file:
             for resp in responses:
                 file.write(resp + "\n")
 
