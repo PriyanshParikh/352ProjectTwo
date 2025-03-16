@@ -13,15 +13,17 @@ def load_database(filename):
 
 def send_query_to_ts(domain, ts_hostname, ts_port, query_id):
     try:
+        print(f"Attempting to connect to {ts_hostname}:{ts_port} for domain: {domain}")  # Debug
         ts_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ts_socket.connect((ts_hostname, ts_port))
         query = f"0 {domain} {query_id} rd"
         ts_socket.send(query.encode())
         response = ts_socket.recv(1024).decode()
         ts_socket.close()
+        print(f"Received response from {ts_hostname}: {response}")  # Debug
         return response
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error connecting to {ts_hostname}:{ts_port}: {e}")  # Debug
         return None
 
 def main():
@@ -51,6 +53,8 @@ def main():
         query_id = parts[2]
         flag = parts[3]
 
+        print(f"Received query: {query}")  # Debug
+
         # Initialize response variable
         response = None
 
@@ -66,6 +70,7 @@ def main():
                     else:
                         response = ts_response
         elif domain.endswith(".edu") and ts2_hostname:
+            print(f"Forwarding .edu domain {domain} to TS2 at {ts2_hostname}:{rudns_port}")  # Debug
             if flag == "it":
                 response = f"1 {domain} {ts2_hostname} {query_id} ns"
             else:
@@ -87,6 +92,7 @@ def main():
         if response is None:
             response = f"1 {domain} 0.0.0.0 {query_id} nx"
 
+        print(f"Sending response: {response}")  # Debug
         responses.append(response)
         client_socket.send(response.encode())
         client_socket.close()
